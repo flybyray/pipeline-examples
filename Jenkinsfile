@@ -1,34 +1,22 @@
 node {
-  // Mark the code checkout 'stage'....
-  stage 'Stage Checkout'
+    // Get Artifactory server instance, defined in the Artifactory Plugin administration page.
+    def server = Artifactory.server "SERVER_ID"
+    // Create an Artifactory Maven instance.
+    def rtMaven = Artifactory.newMavenBuild()
 
-  // Checkout code from repository and update any submodules
-  checkout scm
-  sh 'git submodule update --init'  
+    stage 'Clone sources'
+    git url: 'https://github.com/jfrogdev/project-examples.git'
 
-  stage 'Stage Build'
+    stage 'Artifactory configuration'
+    // Tool name from Jenkins configuration
+    rtMaven.tool = "Maven-3.3.9"
+    // Set Artifactory repositories for dependencies resolution and artifacts deployment.
+    rtMaven.deployer releaseRepo:'libs-release-local', snapshotRepo:'libs-snapshot-local', server: server
+    rtMaven.resolver releaseRepo:'libs-release', snapshotRepo:'libs-snapshot', server: server
 
-  //branch name from Jenkins environment variables
-  echo "My branch is: ${env.BRANCH_NAME}"
+    stage 'Maven build'
+    def buildInfo = rtMaven.run pom: 'maven-example/pom.xml', goals: 'clean install'
 
-  def flavor = flavor(env.BRANCH_NAME)
-  echo "Building flavor ${flavor}"
-
-  //build your gradle flavor, passes the current build number as a parameter to gradle
-  sh "./gradlew clean assemble${flavor}Debug -PBUILD_NUMBER=${env.BUILD_NUMBER}"
-
-  stage 'Stage Archive'
-  //tell Jenkins to archive the apks
-  archiveArtifacts artifacts: 'app/build/outputs/apk/*.apk', fingerprint: true
-
-  stage 'Stage Upload To Fabric'
-  sh "./gradlew crashlyticsUploadDistribution${flavor}Debug  -PBUILD_NUMBER=${env.BUILD_NUMBER}"
-}
-
-// Pulls the android flavor out of the branch name the branch is prepended with /QA_
-@NonCPS
-def flavor(branchName) {
-  def matcher = (env.BRANCH_NAME =~ /QA_([a-z_]+)/)
-  assert matcher.matches()
-  matcher[0][1]
+    stage 'Publish build info'
+    server.publishBuildInfo buildInfo
 }
